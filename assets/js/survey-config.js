@@ -23,8 +23,8 @@ const SURVEY = {
     title: "Enquête nationale sur les méthodes de suivi des herbiers marins à Madagascar",
     subtitle: "Inventaire des pratiques, des indicateurs et des besoins en vue d'un protocole national harmonisé",
     organizer: "Fondation pour les aires protégées et la biodiversité de Madagascar en collaboration avec l'Institut Halieutique et des Sciences Marines",
-    contactName: "José Randrianandrasana",
-    contactEmail: "jossarobidy@gmail.com",
+    contactName: "Beva Grilante",
+    contactEmail: "bevgrilante@gmail.com ",
     deadline: "15 Novembre 2026",
     estimatedTime: "25 à 45 min",
     // Coller ici l'URL du déploiement Google Apps Script (voir README, étape 2)
