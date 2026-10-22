@@ -1,5 +1,5 @@
 # Link to form page
-https://edu-aroo.github.io/seagrass_madagascar_survey/
+https://edu-aroo.github.io/seagrass-madagascar-survey/
 
 # Link to report page
-https://edu-aroo.github.io/seagrass_madagascar_survey/rapport/
+https://edu-aroo.github.io/seagrass-madagascar-survey/rapport/
