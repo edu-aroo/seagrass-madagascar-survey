@@ -34,7 +34,7 @@ const SURVEY = {
     "contactEmail": "grilante.beva@gmail.com",
     "deadline": "15 Novembre 2026",
     "estimatedTime": "20 à 40 min",
-    "appsScriptUrl": "https://script.google.com/macros/s/AKfycbxiCzCJz4RBM2_abqx2tPsvFvDKJ7yl6M3qW2UPO4G3hVk12P3n8KOaC8y8Xd5Zysoy/exec",
+    "appsScriptUrl": "https://script.google.com/macros/s/AKfycbyLW5ecyEXqzf626fjiahBC_ehq68AQyjSemcKV9TUqd1CoheH92Qi928fXeR3_HFn5VQ/exec",
     "logos": [
       {
         "src": "assets/img/logos/ihsm.png",
