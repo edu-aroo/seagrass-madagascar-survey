@@ -32,7 +32,7 @@ const SURVEY = {
     "organizer": "Fondation pour les Aires Protégées et la Biodiversité de Madagascar (FAPBM), en collaboration avec l’Institut Halieutique et des Sciences Marines (IH.SM) – Université de Toliara",
     "contactName": "Beva Grilante",
     "contactEmail": "grilante.beva@gmail.com",
-    "deadline": "[date limite]",
+    "deadline": "15 Novembre 2026",
     "estimatedTime": "20 à 40 min",
     "appsScriptUrl": "https://script.google.com/macros/s/AKfycbxiCzCJz4RBM2_abqx2tPsvFvDKJ7yl6M3qW2UPO4G3hVk12P3n8KOaC8y8Xd5Zysoy/exec",
     "logos": [
