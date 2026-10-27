@@ -15,11 +15,13 @@
 <body>
   <header class="topbar">
     <div class="wrap">
+    <p class="topbar-note">© Aroo Falinirina,  <span id="headerYear"></span> · Enquête à usage scientifique</p>
       <ul class="logos" id="logos" aria-label="Institutions partenaires"></ul>
     </div>
   </header>
 
   <section class="hero">
+    <div class="hero-photo" id="heroPhoto" aria-hidden="true"></div>
     <div class="wrap hero-inner">
       <p class="hero-org" id="heroOrganizer"></p>
       <h1 id="heroTitle"></h1>
@@ -30,6 +32,7 @@
         <li><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zM9 6a3 3 0 0 1 6 0v2H9V6z"/></svg>Réponses confidentielles</li>
       </ul>
     </div>
+    <p class="hero-credit wrap small" id="heroCredit"></p>
     <svg class="hero-wave" viewBox="0 0 1440 60" preserveAspectRatio="none" aria-hidden="true"><path d="M0 30c120 20 240 30 360 20S600 10 720 14s240 30 360 30 240-20 360-24v40H0z" fill="var(--bg)"/></svg>
   </section>
 
@@ -50,7 +53,7 @@
         </div>
 
         <div class="draft-banner" id="draftBanner" hidden>
-          <p><strong>Un brouillon a été retrouvé sur cet appareil.</strong> Souhaitez-vous reprendre là où vous vous étiez arrêté(e) ? <span class="muted small">(les photos éventuelles devront être ajoutées à nouveau)</span></p>
+          <p><strong>Un brouillon a été retrouvé sur cet appareil.</strong> Souhaitez-vous reprendre là où vous vous étiez arrêté(e) ? <span class="muted small">(les fichiers joints éventuels devront être ajoutés à nouveau)</span></p>
           <div><button type="button" class="btn btn-primary btn-sm" id="btnResume">Reprendre</button>
           <button type="button" class="btn btn-ghost btn-sm" id="btnRestart">Recommencer</button></div>
         </div>
@@ -70,7 +73,7 @@
   <footer class="footer">
     <div class="wrap footer-inner">
       <p><strong id="footerOrganizer"></strong><br>Contact : <a id="footerContact" href="#"></a></p>
-      <p class="muted small">©  by Aroo Falinirina, <span id="footerYear"></span> · Enquête à usage scientifique</p>
+      <p class="muted small">© by Aroo Falinirina,  <span id="footerYear"></span> · Enquête à usage scientifique<br><span id="photoCredits"></span></p>
     </div>
   </footer>
 

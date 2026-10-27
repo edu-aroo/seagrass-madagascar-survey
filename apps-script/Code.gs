@@ -1,23 +1,30 @@
 /**
- * Réception des réponses de l'enquête « herbiers marins » → Google Sheets + Google Drive
+ * Réception des réponses de l'enquête « suivi des herbiers marins » → Google Sheets + Google Drive
  * ------------------------------------------------------------------------------
  * À coller dans : Google Sheet > Extensions > Apps Script (script lié à la feuille).
  * Voir README.md, étape 2, pour le déploiement en « Application Web ».
  *
  * Onglets créés automatiquement :
- *   - Reponses : une ligne par répondant (sections A, B, C, I, M, N)
- *   - Methodes : une ligne par méthode décrite (sections C18–20, D à M ; lien via response_id)
+ *   - Reponses : une ligne par organisation répondante (sections A–C, I, M, N)
+ *   - Methodes : une ligne par méthode de suivi décrite (Q20–Q59), reliée par response_id
  *   - Journal  : erreurs éventuelles
- * Les photos sont enregistrées dans un dossier Drive (un sous-dossier par réponse).
+ * Photos (Q71) : enregistrées dans un dossier Google Drive (créé au besoin),
+ * un sous-dossier par réponse ; les liens sont écrits dans la colonne q071_fichiers.
+ * Les colonnes manquantes sont ajoutées à la volée : modifier le questionnaire
+ * ne nécessite pas de modifier ce script.
  */
 
-// ID du dossier Google Drive pour les photos (la partie après /folders/ dans l'URL du dossier).
-// Laisser vide pour créer automatiquement un dossier « Enquete_herbiers_photos » à la racine du Drive.
-const PHOTO_FOLDER_ID = "";
-
 const SHEET_RESPONSES = "Reponses";
-const SHEET_METHODS = "Methodes";
+const SHEET_LOOP_DEFAULT = "Methodes";
 const SHEET_LOG = "Journal";
+// Dossier Drive des pièces jointes : laisser vide pour le créer automatiquement à côté de la feuille,
+// ou coller l'ID d'un dossier existant (la partie après /folders/ dans son URL).
+const DRIVE_FOLDER_ID = "";
+const DRIVE_FOLDER_NAME = "Enquête herbiers marins — photos";
+// Facultatif : adresse e-mail qui reçoit une notification à chaque réponse
+const NOTIFY_EMAIL = "";
+
+const ALLOWED_EXT = ["jpg", "jpeg", "png"];
 
 function doPost(e) {
   const lock = LockService.getScriptLock();
@@ -34,30 +41,34 @@ function doPost(e) {
     // Doublon (double-clic, renvoi après coupure réseau) : on ne réenregistre pas
     if (alreadyStored_(ss, data.response_id)) return json_({ ok: true, duplicate: true, id: data.response_id });
 
-    const links = savePhotos_(data.photos || [], data.response_id, data.general.q03);
-    const now = new Date();
-
     const meta = {
       response_id: data.response_id,
-      horodatage_serveur: now,
+      horodatage_serveur: new Date(),
       survey_version: data.survey_version,
       started_at: data.started_at,
       submitted_at_client: data.submitted_at_client,
       duration_min: data.duration_min
     };
 
-    appendObject_(ss, SHEET_RESPONSES, Object.assign({}, meta, data.general, {
-      photos_liens: links.join(" | ")
-    }));
+    // Pièces jointes → Drive (avant l'écriture, pour pouvoir noter les liens)
+    const general = Object.assign({}, data.general);
+    const files = Array.isArray(data.fichiers) ? data.fichiers : [];
+    const fileCol = (data.fichiers_question || "q071") + "_fichiers";
+    general[fileCol] = files.length ? saveFiles_(data.response_id, general.q003 || "", files).join(" | ") : "";
 
-    (data.methods || []).forEach(function (m) {
-      appendObject_(ss, SHEET_METHODS, Object.assign({
-        response_id: data.response_id,
-        horodatage_serveur: now,
-        q03: data.general.q03
-      }, m));
+    appendObject_(ss, SHEET_RESPONSES, Object.assign({}, meta, general));
+    const loopSheet = data.boucle_onglet || SHEET_LOOP_DEFAULT;
+    (data.boucle || []).forEach(function (r) {
+      appendObject_(ss, loopSheet, Object.assign({ response_id: data.response_id }, r));
     });
 
+    if (NOTIFY_EMAIL) {
+      MailApp.sendEmail(NOTIFY_EMAIL, "Enquête herbiers marins — nouvelle réponse",
+        "Organisation : " + (general.q003 || "?") + "\nRépondant : " + (general.q001 || "?") +
+        "\nMéthodes décrites : " + (general.methodes_decrites || "aucune") +
+        "\nPhotos : " + files.length +
+        "\nRéférence : " + data.response_id.slice(0, 8).toUpperCase());
+    }
     return json_({ ok: true, id: data.response_id });
   } catch (err) {
     try {
@@ -74,6 +85,28 @@ function doPost(e) {
 // Test rapide : ouvrir l'URL /exec dans le navigateur doit afficher {"ok":true,...}
 function doGet() {
   return json_({ ok: true, message: "Service de collecte actif" });
+}
+
+/* ----------------------------------------------------------------- pièces jointes */
+
+function rootFolder_() {
+  if (DRIVE_FOLDER_ID) return DriveApp.getFolderById(DRIVE_FOLDER_ID);
+  const it = DriveApp.getFoldersByName(DRIVE_FOLDER_NAME);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(DRIVE_FOLDER_NAME);
+}
+
+/** Enregistre les fichiers (base64) dans un sous-dossier par réponse ; renvoie les liens. */
+function saveFiles_(id, org, files) {
+  const sub = rootFolder_().createFolder(id.slice(0, 8).toUpperCase() + (org ? " — " + String(org).slice(0, 60) : ""));
+  const links = [];
+  files.slice(0, 5).forEach(function (f) {
+    const name = String(f.name || "fichier").replace(/[\\/:*?"<>|]/g, "_").slice(0, 120);
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    if (ALLOWED_EXT.indexOf(ext) === -1 || !f.data) return;          // format non autorisé : ignoré
+    const blob = Utilities.newBlob(Utilities.base64Decode(f.data), f.type || "application/octet-stream", name);
+    links.push(sub.createFile(blob).getUrl());
+  });
+  return links;
 }
 
 /* ----------------------------------------------------------------- utilitaires */
@@ -101,10 +134,15 @@ function appendObject_(ss, name, obj) {
     sh.setFrozenRows(1);
   }
   const row = headers.map(function (h) { return clean_(obj[h]); });
-  sh.getRange(sh.getLastRow() + 1, 1, 1, row.length).setValues([row]);
+  // Format texte pour éviter les conversions automatiques (« 2020 », « 1–3 », dates…)
+  const range = sh.getRange(sh.getLastRow() + 1, 1, 1, row.length);
+  range.setNumberFormat("@");
+  const iDate = headers.indexOf("horodatage_serveur");
+  if (iDate >= 0) range.getCell(1, iDate + 1).setNumberFormat("yyyy-mm-dd hh:mm:ss");
+  range.setValues([row]);
 }
 
-/** Évite l'interprétation en formule (=, +, -, @) et la conversion automatique en date. */
+/** Évite l'interprétation en formule (=, +, -, @). */
 function clean_(v) {
   if (v === undefined || v === null) return "";
   if (v instanceof Date || typeof v === "number" || typeof v === "boolean") return v;
@@ -113,24 +151,9 @@ function clean_(v) {
   return s;
 }
 
-function photoRoot_() {
-  if (PHOTO_FOLDER_ID) return DriveApp.getFolderById(PHOTO_FOLDER_ID);
-  const it = DriveApp.getFoldersByName("Enquete_herbiers_photos");
-  return it.hasNext() ? it.next() : DriveApp.createFolder("Enquete_herbiers_photos");
-}
-
-function savePhotos_(photos, id, org) {
-  if (!photos.length) return [];
-  const safeOrg = String(org || "organisation").replace(/[^\wÀ-ÿ -]/g, "").slice(0, 40).trim();
-  const folder = photoRoot_().createFolder(Utilities.formatDate(new Date(), "Indian/Antananarivo", "yyyy-MM-dd") + "_" + safeOrg + "_" + id.slice(0, 8));
-  return photos.slice(0, 5).map(function (p, i) {
-    const blob = Utilities.newBlob(Utilities.base64Decode(p.data), p.type || "image/jpeg", (i + 1) + "_" + p.name);
-    return folder.createFile(blob).getUrl();
-  });
-}
-
-/** À exécuter une fois depuis l'éditeur pour accorder les autorisations (Drive + Sheets). */
+/** À exécuter une fois depuis l'éditeur pour accorder les autorisations (Sheets, Drive, e-mail). */
 function autoriser() {
-  photoRoot_();
   SpreadsheetApp.getActiveSpreadsheet().getName();
+  Logger.log("Dossier des pièces jointes : " + rootFolder_().getUrl());
+  if (NOTIFY_EMAIL) MailApp.getRemainingDailyQuota();
 }

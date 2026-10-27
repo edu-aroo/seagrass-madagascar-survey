@@ -7,12 +7,24 @@
 
   const META = SURVEY.META;
   const MAX_METHODS = SURVEY.MAX_METHODS || 3;
-  const STORE_KEY = "herbiers-enquete-draft-v" + META.version;
+  const STORE_KEY = (META.storeKey || "enquete") + "-draft-v" + META.version;
+  const LOOP = SURVEY.LOOP || null;                           // blocs répétés pour chaque élément coché (ex. méthodes)
+  const HAS_METHODS = !!LOOP;
+  const QDEF = {};
+  SURVEY.STEPS.forEach(s => s.questions.forEach(q => { QDEF[q.id] = q; }));
+  const PHOTOS = SURVEY.PHOTOS || [];
+  const photoByKey = k => PHOTOS.find(p => p.key === k);
   const SEP = " | ";
+  const DEFAULT_EXT = ["pdf", "doc", "docx", "xls", "xlsx", "csv", "jpg", "jpeg", "png"];
+  const acceptExt = q => q.accept || DEFAULT_EXT;
+  const acceptAttr = q => acceptExt(q).map(e => "." + e).join(",");
+  const acceptLabel = q => q.acceptLabel || "PDF, Word, Excel, JPG ou PNG";
+  const LOOP_KEY = LOOP ? (LOOP.key || "element") : "";
+  const LOOP_KEYS = LOOP ? (LOOP.keyPlural || LOOP_KEY + "s") : "";
 
   /* ------------------------------------------------------------ état */
   let state = freshState();
-  let photos = [];            // {name, type, dataUrl, kb} — non sauvegardées dans le brouillon
+  let photos = [];            // fichiers joints {name, type, dataUrl, kb, isImage} — non sauvegardés dans le brouillon
   let steps = [];
   let saveTimer = null;
 
@@ -37,7 +49,8 @@
   }
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const isEmpty = v => v == null || v === "" || (Array.isArray(v) && (v.length === 0 || v.every(x => x === "" || x == null)));
-  const isOther = o => /^Autre/.test(o);
+  const isOther = o => /^Autre/.test(o) || /\(préciser\)/.test(o);
+  const isExclusive = o => /^(Aucun|Ne sait pas)/.test(o);
   const $ = (sel, root) => (root || document).querySelector(sel);
   const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
 
@@ -45,23 +58,21 @@
     if (q.optionsFrom) return SURVEY[q.optionsFrom];
     return q.options || [];
   }
-  function optionLabel(o) { return isOther(o) ? "Autre (préciser)" : o; }
+  function optionLabel(o) { return o === "Autre" ? "Autre (préciser)" : o; }
 
   /* ---------------------------------------------- méthodes décrites */
   function selectedMethodNames() {
-    const sel = state.general.q17 || [];
+    if (!HAS_METHODS) return [];
+    const src = LOOP.source;
+    const sel = state.general[src] || [];
     return sel.map(v => isOther(v)
-      ? (state.general.q17_autre ? "Autre : " + state.general.q17_autre.trim() : "Autre méthode")
+      ? (state.general[src + "_autre"] ? "Autre : " + state.general[src + "_autre"].trim() : (LOOP.otherName || "Autre"))
       : v);
   }
   function methodNames() {
-    if (state.general.q14 === "Non") return [];
-    let names = selectedMethodNames();
-    if (names.length > MAX_METHODS) {
-      const picked = state.general.q17_principales || [];
-      names = names.filter(n => picked.includes(n));
-    }
-    return names.slice(0, MAX_METHODS);
+    if (!HAS_METHODS) return [];
+    if (!condDeep(LOOP.active, state.general)) return [];
+    return selectedMethodNames();
   }
   function methodAnswers(name) {
     if (!state.methods[name]) state.methods[name] = {};
@@ -71,16 +82,29 @@
   /* ---------------------------------------------------- conditions */
   function cond(c, ans) {
     if (!c) return true;
+    if (c.all) return c.all.every(x => cond(x, ans));
     const v = ans[c.q];
     if ("eq" in c) return Array.isArray(v) ? v.includes(c.eq) : v === c.eq;
-    if ("ne" in c) return v !== c.ne;
+    if ("ne" in c) return Array.isArray(v) ? !v.includes(c.ne) : v !== c.ne;
     if ("in" in c) return c.in.includes(v);
-    if (c.filled) return c.q === "q72" ? photos.length > 0 : !isEmpty(v);
+    const arr = Array.isArray(v) ? v : (isEmpty(v) ? [] : [v]);
+    if ("starts" in c) return arr.some(x => String(x).startsWith(c.starts));
+    if ("any" in c) return arr.some(x => c.any.includes(x));
+    if ("notOnly" in c) return !(arr.length === 1 && arr[0] === c.notOnly);
+    if (c.filled) return (QDEF[c.q] && QDEF[c.q].type === "file") ? photos.length > 0 : !isEmpty(v);
     return true;
   }
+  // Condition + visibilité de la question dont elle dépend (conditions en cascade : Q13 ← Q12 ← Q11)
+  function condDeep(c, ans, self) {
+    if (!c) return true;
+    if (c.all) return c.all.every(x => condDeep(x, ans, self));
+    const parent = QDEF[c.q];
+    if (parent && parent !== self && !questionVisible(parent, ans)) return false;
+    return cond(c, ans);
+  }
   function questionVisible(q, ans) {
-    if (q.type === "methodpick") return selectedMethodNames().length > MAX_METHODS;
-    return cond(q.showIf, ans);
+    if (!q.showIf) return true;
+    return condDeep(q.showIf, ans, q);
   }
 
   /* --------------------------------------------------------- étapes */
@@ -93,18 +117,19 @@
         if (methodBlockDone) continue;
         methodBlockDone = true;
         methodNames().forEach((name, i) => {
-          perMethod.forEach((pm, j) => {
-            if (!cond(pm.showIf, state.general)) return;
+          const merged = Object.assign({}, state.general, methodAnswers(name));
+          const active = perMethod.filter(pm => condDeep(pm.showIf, merged));
+          active.forEach((pm, j) => {
             out.push({
               id: "m" + i + "-" + pm.key, kind: "questions", def: pm, title: pm.title, short: pm.short,
-              scope: { method: name, index: i }, group: "Méthode " + (i + 1) + " · " + name,
-              sub: (j + 1) + "/" + perMethod.length
+              scope: { method: name, index: i }, group: LOOP.label + " " + (i + 1) + " · " + name,
+              sub: (j + 1) + "/" + active.length
             });
           });
         });
         continue;
       }
-      if (!cond(s.showIf, state.general)) continue;
+      if (!condDeep(s.showIf, state.general)) continue;
       out.push({ id: s.key, kind: "questions", def: s, title: s.title, short: s.short, scope: null, group: null });
     }
     out.push({ id: "recap", kind: "recap", title: "Vérification et envoi", short: "Vérification et envoi", group: null });
@@ -117,8 +142,27 @@
     return step.scope ? Object.assign({}, state.general, methodAnswers(step.scope.method)) : state.general;
   }
 
+  /* ------------------------------------------------------ photos */
+  // Fichier local (assets/img/photos) en priorité ; à défaut, copie hébergée sur Wikimedia Commons
+  function photoImg(p, cls, sizes) {
+    if (!p) return "";
+    return `<img class="${cls || ""}" src="${esc(p.src)}" data-remote="${esc(p.remote)}" alt="${esc(p.caption)}" loading="lazy" ${sizes ? `sizes="${sizes}"` : ""}
+      onerror="if(this.dataset.remote&&this.src!==this.dataset.remote){this.src=this.dataset.remote}else{this.closest('figure,.photo-slot')&&this.closest('figure,.photo-slot').classList.add('no-photo')}">`;
+  }
+  function photoFigure(p, cls) {
+    if (!p) return "";
+    return `<figure class="photo ${cls || ""}">${photoImg(p)}
+      <figcaption><span>${esc(p.caption)}</span><a href="${esc(p.page)}" target="_blank" rel="noopener">© ${esc(p.credit)} · ${esc(p.license)}</a></figcaption></figure>`;
+  }
+
   /* ------------------------------------------------- rendu en-tête */
   function renderChrome() {
+    const hero = photoByKey(META.heroPhoto);
+    if (hero) {
+      $("#heroPhoto").innerHTML = photoImg(hero, "hero-img");
+      $("#heroCredit").innerHTML = `${esc(hero.caption)} · <a href="${esc(hero.page)}" target="_blank" rel="noopener">© ${esc(hero.credit)}, ${esc(hero.license)}</a>`;
+    }
+    if (META.photoCreditNote) $("#photoCredits").textContent = META.photoCreditNote;
     document.title = META.title;
     $("#heroTitle").textContent = META.title;
     $("#heroSubtitle").textContent = META.subtitle;
@@ -130,6 +174,7 @@
     mail.textContent = META.contactName + " — " + META.contactEmail;
     mail.href = "mailto:" + META.contactEmail;
     $("#footerYear").textContent = new Date().getFullYear();
+    $("#headerYear").textContent = new Date().getFullYear();
 
     const logos = $("#logos");
     logos.innerHTML = META.logos.map(l => {
@@ -177,7 +222,7 @@
     switch (q.type) {
       case "text": case "email": case "tel": {
         const t = q.type === "text" ? "text" : q.type;
-        const ac = { q01: "name", q02: "organization-title", q03: "organization", q04: "email", q05: "tel" }[q.id] || "off";
+        const ac = { q001: "name", q002: "email", q003: "tel", q005: "organization" }[q.id] || "off";
         field = `<input class="input" type="${t}" id="${uid}" name="${uid}" value="${esc(v || "")}" autocomplete="${ac}">`;
         break;
       }
@@ -188,9 +233,18 @@
         const yr = new Date().getFullYear();
         const min = q.type === "year" ? 1950 : (q.min != null ? q.min : "");
         const max = q.type === "year" ? yr : (q.max != null ? q.max : "");
+        const unitSel = q.units ? `<select class="input input-unit" name="${uid}__unite" data-sub="unite" aria-label="Unité">${q.units.map(u =>
+            `<option value="${esc(u)}" ${(ans[q.id + "_unite"] || q.units[0]) === u ? "selected" : ""}>${esc(u)}</option>`).join("")}</select>` : "";
         field = `<div class="num-wrap"><input class="input input-num" type="number" inputmode="${q.type === "year" ? "numeric" : "decimal"}" step="${q.type === "year" ? 1 : "any"}"
           id="${uid}" name="${uid}" value="${v == null ? "" : esc(v)}" ${min !== "" ? `min="${min}"` : ""} ${max !== "" ? `max="${max}"` : ""} ${q.type === "year" ? 'placeholder="AAAA"' : ""}>
-          ${q.unit ? `<span class="unit">${esc(q.unit)}</span>` : ""}</div>`;
+          ${q.unit ? `<span class="unit">${esc(q.unit)}</span>` : ""}${unitSel}</div>`;
+        break;
+      }
+      case "grid": {
+        const g = v || {};
+        field = `<div class="grid-rows">` + q.rows.map(r => `<label class="grid-row" for="${uid}__${r.key}"><span>${esc(r.label)}</span>
+            <span class="num-wrap"><input class="input input-num" type="number" min="0" step="1" inputmode="numeric" id="${uid}__${r.key}" data-row="${r.key}" value="${g[r.key] == null ? "" : esc(g[r.key])}">
+            ${q.unit ? `<span class="unit">${esc(q.unit)}</span>` : ""}</span></label>`).join("") + `</div>`;
         break;
       }
       case "datetime":
@@ -200,15 +254,18 @@
         const multi = q.type !== "radio";
         const opts = q.type === "methodpick" ? selectedMethodNames() : optionsOf(q);
         const sel = multi ? (v || []) : v;
-        const cols = opts.length > 6 ? " choices-2col" : "";
         const lim = q.max || (q.type === "methodpick" ? MAX_METHODS : 0);
         const full = lim && multi && sel.length >= lim;
-        field = `<div class="choices${cols}" role="${multi ? "group" : "radiogroup"}">` + opts.map((o, k) => {
+        const one = o => {
           const checked = multi ? sel.includes(o) : sel === o;
           const dis = full && !checked;
           return `<label class="choice${dis ? " is-disabled" : ""}"><input type="${multi ? "checkbox" : "radio"}" name="${uid}" value="${esc(o)}" ${checked ? "checked" : ""} ${dis ? "disabled" : ""}>
             <span class="mark" aria-hidden="true"></span><span class="choice-text">${esc(q.type === "methodpick" ? o : optionLabel(o))}</span></label>`;
-        }).join("") + `</div>`;
+        };
+        const block = list => `<div class="choices${list.length > (q.groups ? 2 : 6) ? " choices-2col" : ""}" role="${multi ? "group" : "radiogroup"}">${list.map(one).join("")}</div>`;
+        field = q.groups
+          ? `<div class="choice-groups">` + q.groups.map(g => `<div class="choice-group">${g.label ? `<p class="choice-group-title">${esc(g.label)}</p>` : ""}${block(g.options)}</div>`).join("") + `</div>`
+          : block(opts);
         if (q.other) {
           const show = multi ? (sel || []).some(isOther) : isOther(sel || "");
           field += `<div class="other-wrap" ${show ? "" : "hidden"}><input class="input" type="text" name="${uid}__autre" data-sub="autre"
@@ -233,16 +290,21 @@
         break;
       case "file":
         field = `<div class="dropzone" id="${uid}" tabindex="0">
-            <input type="file" accept="image/jpeg,image/png" multiple hidden>
+            <input type="file" accept="${acceptAttr(q)}" multiple hidden>
             <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="currentColor" d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"/></svg>
-            <p><strong>Cliquez pour choisir des photos</strong> ou glissez-les ici</p>
-            <p class="muted small">JPG ou PNG · ${q.maxFiles} photos maximum</p>
+            <p><strong>Cliquez pour choisir des fichiers</strong> ou glissez-les ici</p>
+            <p class="muted small">${esc(acceptLabel(q))} · ${q.maxFiles} fichiers et ${q.maxMB} Mo maximum</p>
           </div><ul class="thumbs" id="thumbs"></ul>`;
         break;
     }
+    if (q.detail) {
+      field += `<label class="explain-label" for="${uid}__detail">${esc(q.detail.label)} <span class="muted small">(facultatif)</span></label>
+        <input class="input${q.detail.type === "number" ? " input-num" : ""}" type="${q.detail.type === "number" ? "number" : "text"}" ${q.detail.type === "number" ? 'min="0" style="max-width:200px"' : ""}
+          id="${uid}__detail" name="${uid}__detail" data-sub="detail" value="${esc(ans[q.id + "_detail"] || "")}">`;
+    }
     const sigAttr = q.type === "methodpick" ? ` data-sig="${esc(selectedMethodNames().join("\u0001"))}"` : "";
     return `<div class="q" data-qid="${q.id}" data-type="${q.type}"${sigAttr} ${questionVisible(q, condAnswers(step)) ? "" : "hidden"}>
-      <div class="q-head">${num}<label class="q-label" ${["radio", "checkbox", "scale", "rank", "methodpick", "file"].includes(q.type) ? "" : `for="${uid}"`}>${esc(q.label)}${req}</label></div>
+      <div class="q-head">${num}<label class="q-label" ${["radio", "checkbox", "scale", "rank", "methodpick", "file", "grid"].includes(q.type) ? "" : `for="${uid}"`}>${esc(q.label)}${req}</label></div>
       ${q.help ? `<p class="q-help">${esc(q.help)}</p>` : ""}
       <div class="q-field">${field}</div>
       <p class="q-error" role="alert"></p>
@@ -257,7 +319,7 @@
     const choices = rankChoices(step, q);
     const ans = scopeAnswers(step);
     const cur = ans[q.id] || [];
-    if (!choices.length) return `<p class="muted">Sélectionnez d'abord des contraintes à la question précédente.</p>`;
+    if (!choices.length) return `<p class="muted">${esc(q.rankEmpty || "Répondez d'abord à la question précédente.")}</p>`;
     const n = Math.min(q.ranks, choices.length);
     let html = "";
     for (let r = 0; r < n; r++) {
@@ -279,8 +341,12 @@
     if (step.kind === "intro") {
       html = `<div class="step-head"><p class="eyebrow">Présentation</p><h2>${esc(META.title)}</h2></div>
         <div class="intro">${META.intro.map(p => `<p>${esc(p)}</p>`).join("")}</div>
+            ${META.draftNote ? `<div class="notice"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"/></svg>
+          <div><strong>Enregistrement automatique</strong><p>${esc(META.draftNote)}</p></div></div>` : ""}
+        ${(META.introPhotos || []).length ? `<div class="photo-mosaic">${META.introPhotos.map(k => photoFigure(photoByKey(k))).join("")}</div>` : ""}
         <div class="notice"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
           <div><strong>Confidentialité</strong><p>${esc(META.privacy)}</p></div></div>
+       
         <ul class="facts">
           <li><span>Durée estimée</span><strong>${esc(META.estimatedTime)}</strong></li>
           <li><span>Date limite</span><strong>${esc(META.deadline)}</strong></li>
@@ -295,14 +361,17 @@
     } else {
       const def = step.def;
       const secLetters = def.sections ? def.sections.join(" · ") : def.key;
-      html = `<div class="step-head">
-          ${step.scope ? `<div class="method-banner"><span class="method-tag">Méthode ${step.scope.index + 1} / ${methodNames().length}</span><strong>${esc(step.scope.method)}</strong><span class="muted small">Partie ${step.sub}</span></div>` : ""}
+      const qSteps = steps.filter(s => s.kind === "questions");
+      const others = PHOTOS.filter(p => p.key !== META.heroPhoto);
+      const banner = others.length ? others[qSteps.indexOf(step) % others.length] : null;
+      html = (banner ? photoFigure(banner, "photo-banner") : "") + `<div class="step-head">
+          ${step.scope ? `<div class="method-banner"><span class="method-tag">${esc(LOOP.label)} ${step.scope.index + 1} / ${methodNames().length}</span><strong>${esc(step.scope.method)}</strong><span class="muted small">Partie ${step.sub}</span></div>` : ""}
           <p class="eyebrow">Section ${esc(secLetters)}</p><h2>${esc(def.title)}</h2>
-          ${step.scope ? `<p class="muted">Les questions de cette partie portent uniquement sur la méthode <strong>${esc(step.scope.method)}</strong>.</p>` : ""}
+          ${step.scope ? `<p class="muted">Les questions de cette partie portent uniquement sur ${esc(LOOP.scopeText || "l'élément")} <strong>${esc(step.scope.method)}</strong>.</p>` : ""}
         </div>`;
       let lastSec = null;
       def.questions.forEach(q => {
-        if (q.section && q.section !== lastSec && def.sections) {
+        if (q.section && q.section !== lastSec && def.sections && def.sections.length > 1) {
           html += `<h3 class="sub-section">${esc(sectionTitle(q.section))}</h3>`;
           lastSec = q.section;
         }
@@ -313,17 +382,12 @@
     $("#btnPrev").hidden = state.current === 0;
     $("#btnNext").hidden = step.kind === "recap";
     $("#btnNext").textContent = state.current === steps.length - 2 ? "Vérifier mes réponses" : "Suivant";
-    if (step.def && step.def.key === "N") bindDropzone(step);
+    if (step.def && step.def.questions.some(q => q.type === "file")) bindDropzone(step);
     renderSidebar();
   }
 
   function sectionTitle(letter) {
-    return ({
-      C: "C. Statut et protocole", D: "D. Objectifs du suivi", E: "E. Indicateurs écologiques",
-      F: "F. Protocole d'échantillonnage", G: "G. Fréquence et temporalité", H: "H. Matériel, ressources et compétences",
-      I: "I. Comparabilité des données", J: "J. Performance de la méthode", K: "K. Contraintes et limites",
-      L: "L. Analyse FFOM (Forces, Faiblesses, Opportunités, Menaces)", M: "M. Intégration dans un protocole national"
-    })[letter] || letter;
+    return (SURVEY.SECTION_TITLES || {})[letter] || letter;
   }
 
   /* -------------------------------------------- lecture des champs */
@@ -346,12 +410,19 @@
       }
       case "rank":
         ans[qid] = named(uid).map(s => s.value); break;
+      case "grid": {
+        const g = {};
+        $$("[data-row]", qEl).forEach(i => { if (i.value !== "") g[i.dataset.row] = Number(i.value); });
+        ans[qid] = g; break;
+      }
       case "file": break;
       default:
         ans[qid] = named(uid)[0].value;
     }
     const o = $(`[data-sub="autre"]`, qEl); if (o) ans[qid + "_autre"] = o.value;
     const p = $(`[data-sub="pourquoi"]`, qEl); if (p) ans[qid + "_pourquoi"] = p.value;
+    const u = $(`[data-sub="unite"]`, qEl); if (u) ans[qid + "_unite"] = u.value;
+    const d = $(`[data-sub="detail"]`, qEl); if (d) ans[qid + "_detail"] = d.value;
   }
 
   function onFieldChange(e) {
@@ -361,6 +432,12 @@
     if (!qEl || step.kind !== "questions") return;
     const qid = qEl.dataset.qid;
     const q = step.def.questions.find(x => x.id === qid);
+    // « Aucun… » / « Ne sait pas » : exclusif des autres cases
+    if (e.target.type === "checkbox" && e.target.checked && !e.target.dataset.sub) {
+      const boxes = $$('.choices input[type="checkbox"]', qEl);
+      if (isExclusive(e.target.value)) boxes.forEach(b => { if (b !== e.target) b.checked = false; });
+      else boxes.forEach(b => { if (isExclusive(b.value)) b.checked = false; });
+    }
     readQuestion(step, qEl);
     const ans = scopeAnswers(step);
 
@@ -392,23 +469,14 @@
     clearError(qEl);
     updateVisibility(step);
 
-    // q14 / q17 modifient la liste des étapes
-    if (["q14", "q17", "q17_principales"].includes(qid) || (qid === "q17" && e.target.dataset.sub === "autre")) {
+    // Certaines réponses (Q11–Q13, Q15…) modifient la liste des étapes
+    const sigOf = list => list.map(s => s.id + ":" + s.group).join("|");
+    const fresh = buildSteps();
+    if (sigOf(fresh) !== sigOf(steps)) {
       const curId = step.id;
-      steps = buildSteps();
+      steps = fresh;
       state.current = Math.max(0, steps.findIndex(s => s.id === curId));
-      state.maxReached = Math.min(state.maxReached, steps.length - 1);
-      // méthodes 17b : affichage dépendant du nombre coché
-      if (qid === "q17") {
-        const mp = $('.q[data-qid="q17_principales"]');
-        const sig = selectedMethodNames().join("\u0001");
-        if (mp && mp.dataset.sig !== sig) {
-          const tmp = document.createElement("div");
-          tmp.innerHTML = renderQuestion(step, step.def.questions.find(x => x.id === "q17_principales"));
-          tmp.firstElementChild.dataset.sig = sig;
-          mp.replaceWith(tmp.firstElementChild);
-        }
-      }
+      state.maxReached = Math.min(Math.max(state.maxReached, state.current), steps.length - 1);
       renderSidebar();
     }
     scheduleSave();
@@ -432,6 +500,10 @@
     if (q.type === "rank") {
       const need = Math.min(q.ranks, rankChoices(step, q).length);
       if (q.required && need > 0 && (v || []).slice(0, need).filter(Boolean).length < need) return `Veuillez classer ${need} contrainte(s).`;
+      return null;
+    }
+    if (q.type === "grid") {
+      if (q.required && !Object.keys(v || {}).length) return "Indiquez au moins un nombre.";
       return null;
     }
     if (q.required && isEmpty(v)) return "Cette question est obligatoire.";
@@ -491,12 +563,15 @@
   /* -------------------------------------------------- récapitulatif */
   function fmt(q, ans) {
     const v = ans[q.id];
-    if (q.type === "file") return photos.length ? photos.length + " photo(s)" : "";
+    if (q.type === "file") return photos.length ? photos.map(p => p.name).join(" ; ") : "";
     if (q.type === "scale") return v ? v + " — " + q.options[v - 1] : "";
     if (q.type === "rank") return (v || []).filter(Boolean).map((x, i) => (i + 1) + ". " + x).join(" ; ");
-    let s = Array.isArray(v) ? v.map(x => isOther(x) ? "Autre" : x).join(" ; ") : (v == null ? "" : String(v));
+    if (q.type === "grid") return q.rows.filter(r => (v || {})[r.key] != null).map(r => r.label + " : " + v[r.key]).join(" ; ");
+    if (q.units && v !== "" && v != null) return v + " " + (ans[q.id + "_unite"] || q.units[0]);
+    let s = Array.isArray(v) ? v.join(" ; ") : (v == null ? "" : String(v));
     if (q.other && ans[q.id + "_autre"] && (Array.isArray(v) ? v.some(isOther) : isOther(v || ""))) s += " (" + ans[q.id + "_autre"] + ")";
     if (q.explain && ans[q.id + "_pourquoi"]) s += " — " + ans[q.id + "_pourquoi"];
+    if (q.detail && ans[q.id + "_detail"]) s += " — " + q.detail.label + " : " + ans[q.id + "_detail"];
     return s;
   }
   function renderRecap() {
@@ -543,10 +618,16 @@
   async function addFiles(fileList, q, step) {
     const qEl = $('.q[data-qid="' + q.id + '"]');
     clearError(qEl);
+    const totalKb = () => photos.reduce((a, p) => a + p.kb, 0);
     for (const f of Array.from(fileList)) {
-      if (photos.length >= q.maxFiles) { setError(qEl, `${q.maxFiles} photos maximum.`); break; }
-      if (!/^image\/(jpeg|png)$/.test(f.type)) { setError(qEl, `« ${f.name} » n'est pas une image JPG ou PNG.`); continue; }
-      try { photos.push(await compress(f)); } catch (err) { setError(qEl, `Impossible de lire « ${f.name} ».`); }
+      if (photos.length >= q.maxFiles) { setError(qEl, `${q.maxFiles} fichiers maximum.`); break; }
+      const ext = (f.name.split(".").pop() || "").toLowerCase();
+      if (!acceptExt(q).includes(ext)) { setError(qEl, `« ${f.name} » : format non accepté (${acceptLabel(q)}).`); continue; }
+      try {
+        const item = /^image\/(jpeg|png)$/.test(f.type) ? await compress(f) : await readRaw(f, ext);
+        if (totalKb() + item.kb > q.maxMB * 1024) { setError(qEl, `« ${f.name} » dépasse la taille totale autorisée (${q.maxMB} Mo). Envoyez les documents volumineux par e-mail à ${META.contactEmail}.`); continue; }
+        photos.push(item);
+      } catch (err) { setError(qEl, `Impossible de lire « ${f.name} ».`); }
     }
     renderThumbs(step);
     updateVisibility(step);
@@ -564,15 +645,29 @@
         ctx.drawImage(img, 0, 0, c.width, c.height);
         const dataUrl = c.toDataURL("image/jpeg", quality);
         URL.revokeObjectURL(url);
-        resolve({ name: file.name.replace(/\.[^.]+$/, "") + ".jpg", type: "image/jpeg", dataUrl, kb: Math.round(dataUrl.length * 0.75 / 1024) });
+        resolve({ name: file.name.replace(/\.[^.]+$/, "") + ".jpg", type: "image/jpeg", dataUrl, kb: Math.round(dataUrl.length * 0.75 / 1024), isImage: true });
       };
       img.onerror = reject;
       img.src = url;
     });
   }
+  const MIME = { pdf: "application/pdf", doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", csv: "text/csv" };
+  function readRaw(file, ext) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => {
+        const type = file.type || MIME[ext] || "application/octet-stream";
+        const dataUrl = "data:" + type + ";base64," + String(r.result).split(",")[1];
+        resolve({ name: file.name, type, dataUrl, kb: Math.max(1, Math.round(file.size / 1024)), isImage: false, ext });
+      };
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
   function renderThumbs(step) {
     const ul = $("#thumbs"); if (!ul) return;
-    ul.innerHTML = photos.map((p, i) => `<li><img src="${p.dataUrl}" alt=""><span class="thumb-name">${esc(p.name)}<br><span class="muted small">${p.kb} Ko</span></span>
+    ul.innerHTML = photos.map((p, i) => `<li>${p.isImage ? `<img src="${p.dataUrl}" alt="">` : `<span class="file-icon">${esc((p.ext || "doc").toUpperCase())}</span>`}<span class="thumb-name">${esc(p.name)}<br><span class="muted small">${p.kb} Ko</span></span>
       <button type="button" class="thumb-del" data-del="${i}" aria-label="Retirer ${esc(p.name)}">×</button></li>`).join("");
     $$("[data-del]", ul).forEach(b => b.addEventListener("click", ev => {
       ev.stopPropagation(); photos.splice(Number(b.dataset.del), 1); renderThumbs(step); updateVisibility(step);
@@ -586,9 +681,12 @@
       const vis = includeValues && questionVisible(q, cAns);
       const v = vis ? ans[q.id] : "";
       switch (q.type) {
-        case "file": out[q.id + "_nb_photos"] = includeValues ? photos.length : 0; return;
+        case "file": out[q.id + "_nb_fichiers"] = includeValues ? photos.length : 0; return;
         case "rank":
           for (let r = 0; r < q.ranks; r++) out[q.id + "_rang" + (r + 1)] = vis ? ((v || [])[r] || "") : "";
+          return;
+        case "grid":
+          q.rows.forEach(r => { const x = vis ? (v || {})[r.key] : null; out[q.id + "_" + r.key] = x == null ? "" : x; });
           return;
         case "checkbox": case "methodpick":
           out[q.id] = Array.isArray(v) ? v.join(SEP) : ""; break;
@@ -600,6 +698,8 @@
         out[q.id + "_autre"] = has ? (ans[q.id + "_autre"] || "").trim() : "";
       }
       if (q.explain) out[q.id + "_pourquoi"] = vis ? (ans[q.id + "_pourquoi"] || "").trim() : "";
+      if (q.units) out[q.id + "_unite"] = vis && !isEmpty(v) ? (ans[q.id + "_unite"] || q.units[0]) : "";
+      if (q.detail) out[q.id + "_detail"] = vis ? String(ans[q.id + "_detail"] || "").trim() : "";
     });
     return out;
   }
@@ -611,16 +711,18 @@
       const active = cond(s.showIf, state.general);
       Object.assign(general, flatten(s.questions, state.general, state.general, active));
     });
-    general.n_methodes_decrites = names.length;
-    general.methodes_decrites = names.join(SEP);
+    if (HAS_METHODS) {
+      general["n_" + LOOP_KEYS + "_decrites"] = names.length;
+      general[LOOP_KEYS + "_decrites"] = names.join(SEP);
+    }
     general.consentement = state.consent ? "Oui" : "Non";
 
     const perMethod = SURVEY.STEPS.filter(s => s.perMethod);
     const methods = names.map((name, i) => {
       const ans = methodAnswers(name);
       const cAns = Object.assign({}, state.general, ans);
-      const row = { methode_index: i + 1, methode_nom: name };
-      perMethod.forEach(s => Object.assign(row, flatten(s.questions, ans, cAns, true)));
+      const row = { [LOOP_KEY + "_index"]: i + 1, [LOOP_KEY + "_nom"]: name };
+      perMethod.forEach(s => Object.assign(row, flatten(s.questions, ans, cAns, condDeep(s.showIf, cAns))));
       return row;
     });
     const now = new Date();
@@ -631,8 +733,9 @@
       submitted_at_client: now.toISOString(),
       duration_min: Math.round((now - new Date(state.startedAt)) / 60000),
       website: ($("#website") || {}).value || "",
-      general, methods,
-      photos: withPhotos ? photos.map(p => ({ name: p.name, type: p.type, data: p.dataUrl.split(",")[1] })) : []
+      general, boucle: methods, boucle_onglet: HAS_METHODS ? (LOOP.sheet || "Boucle") : "",
+      fichiers_question: (SURVEY.STEPS.flatMap(s => s.questions).find(q => q.type === "file") || {}).id || "",
+      fichiers: withPhotos ? photos.map(p => ({ name: p.name, type: p.type, data: p.dataUrl.split(",")[1] })) : []
     };
   }
 
@@ -640,7 +743,7 @@
     const blob = new Blob([JSON.stringify(buildPayload(false), null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "reponses-herbiers-" + state.responseId.slice(0, 8) + ".json";
+    a.download = "reponses-" + (META.storeKey || "enquete") + "-" + state.responseId.slice(0, 8) + ".json";
     document.body.appendChild(a); a.click(); a.remove();
   }
 
@@ -675,7 +778,8 @@
   }
   function done(out) {
     try { localStorage.removeItem(STORE_KEY); } catch (e) { }
-    $("#app").innerHTML = `<div class="panel thanks">
+    const tp = photoByKey(META.thanksPhoto);
+    $("#app").innerHTML = `<div class="panel thanks">${tp ? photoFigure(tp, "photo-thanks") : ""}
       <svg viewBox="0 0 24 24" width="56" height="56" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="var(--accent-soft)"/><path fill="var(--accent)" d="M10 15.17 6.83 12l-1.42 1.41L10 18 19 9l-1.41-1.41z"/></svg>
       <h2>Merci pour votre contribution !</h2>
       <p>Vos réponses ont bien été enregistrées.</p>
