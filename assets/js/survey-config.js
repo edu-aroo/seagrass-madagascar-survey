@@ -33,7 +33,7 @@ const SURVEY = {
     "contactName": "Beva Grilante",
     "contactEmail": "grilante.beva@gmail.com",
     "deadline": "15 Novembre 2026",
-    "estimatedTime": "20 à 40 min",
+    "estimatedTime": "30 à 45 min",
     "appsScriptUrl": "https://script.google.com/macros/s/AKfycbyLW5ecyEXqzf626fjiahBC_ehq68AQyjSemcKV9TUqd1CoheH92Qi928fXeR3_HFn5VQ/exec",
     "logos": [
       {
