@@ -58,6 +58,16 @@
     if (q.optionsFrom) return SURVEY[q.optionsFrom];
     return q.options || [];
   }
+  // Nombre maximal de cases : q.max, éventuellement réduit par la réponse numérique q.maxFrom (ex. Q17 → Q18)
+  function limitOf(q, ans) {
+    if (!q) return 0;
+    let lim = q.max || (q.type === "methodpick" ? MAX_METHODS : 0);
+    if (q.maxFrom) {
+      const n = parseInt((ans || {})[q.maxFrom], 10);
+      if (n > 0) lim = lim ? Math.min(lim, n) : n;
+    }
+    return lim;
+  }
   function optionLabel(o) { return o === "Autre" ? "Autre (préciser)" : o; }
 
   /* ---------------------------------------------- méthodes décrites */
@@ -222,7 +232,7 @@
     switch (q.type) {
       case "text": case "email": case "tel": {
         const t = q.type === "text" ? "text" : q.type;
-        const ac = { q001: "name", q002: "email", q003: "tel", q005: "organization" }[q.id] || "off";
+        const ac = { q001: "name", q002: "organization-title", q003: "organization", q004: "email", q005: "tel" }[q.id] || "off";
         field = `<input class="input" type="${t}" id="${uid}" name="${uid}" value="${esc(v || "")}" autocomplete="${ac}">`;
         break;
       }
@@ -254,7 +264,7 @@
         const multi = q.type !== "radio";
         const opts = q.type === "methodpick" ? selectedMethodNames() : optionsOf(q);
         const sel = multi ? (v || []) : v;
-        const lim = q.max || (q.type === "methodpick" ? MAX_METHODS : 0);
+        const lim = limitOf(q, ans);
         const full = lim && multi && sel.length >= lim;
         const one = o => {
           const checked = multi ? sel.includes(o) : sel === o;
@@ -272,7 +282,7 @@
             placeholder="Précisez…" value="${esc(ans[q.id + "_autre"] || "")}" aria-label="Précisez « Autre »"></div>`;
         }
         if (q.explain) {
-          field += `<label class="explain-label" for="${uid}__pourquoi">${esc(q.explain)}</label>
+          field += `<label class="explain-label" for="${uid}__pourquoi">${esc(q.explain)}${q.explainRequired ? ' <span class="req" title="Obligatoire">*</span>' : ""}</label>
             <textarea class="input" id="${uid}__pourquoi" name="${uid}__pourquoi" data-sub="pourquoi" rows="3">${esc(ans[q.id + "_pourquoi"] || "")}</textarea>`;
         }
         break;
@@ -449,13 +459,18 @@
       ow.hidden = !show;
       if (show && e.target.type !== "text" && e.target.checked && isOther(e.target.value)) $("input", ow).focus();
     }
-    // limite de cases
-    const lim = q && (q.max || (q.type === "methodpick" ? MAX_METHODS : 0));
-    if (lim) {
-      const boxes = $$('input[type="checkbox"]', qEl);
+    // limite de cases (question modifiée + questions dont la limite dépend d'elle via maxFrom)
+    const applyLimit = (qq, el) => {
+      const lim = limitOf(qq, ans);
+      const boxes = $$('.choices input[type="checkbox"]', el);
       const n = boxes.filter(b => b.checked).length;
-      boxes.forEach(b => { if (!b.checked) b.disabled = n >= lim; b.closest(".choice").classList.toggle("is-disabled", b.disabled); });
-    }
+      boxes.forEach(b => { if (!b.checked) b.disabled = !!lim && n >= lim; b.closest(".choice").classList.toggle("is-disabled", b.disabled); });
+    };
+    if (q && limitOf(q, ans)) applyLimit(q, qEl);
+    step.def.questions.filter(x => x.maxFrom === qid).forEach(x => {
+      const el = $(`.q[data-qid="${x.id}"]`);
+      if (el) applyLimit(x, el);
+    });
     // classement dépendant
     if (q && $$(`.rank[data-rank-for="${qid}"]`).length) {
       const rq = step.def.questions.find(x => x.type === "rank" && x.rankFrom === qid);
@@ -469,7 +484,7 @@
     clearError(qEl);
     updateVisibility(step);
 
-    // Certaines réponses (Q11–Q13, Q15…) modifient la liste des étapes
+    // Certaines réponses (Q14 suivi, Q18 méthodes…) modifient la liste des étapes
     const sigOf = list => list.map(s => s.id + ":" + s.group).join("|");
     const fresh = buildSteps();
     if (sigOf(fresh) !== sigOf(steps)) {
@@ -499,7 +514,7 @@
     if (q.type === "file") return null;
     if (q.type === "rank") {
       const need = Math.min(q.ranks, rankChoices(step, q).length);
-      if (q.required && need > 0 && (v || []).slice(0, need).filter(Boolean).length < need) return `Veuillez classer ${need} contrainte(s).`;
+      if (q.required && need > 0 && (v || []).slice(0, need).filter(Boolean).length < need) return `Veuillez classer ${need} ${q.rankNoun || "contrainte(s)"}.`;
       return null;
     }
     if (q.type === "grid") {
@@ -518,7 +533,9 @@
       if (min != null && v < min) return `La valeur doit être supérieure ou égale à ${min}.`;
       if (max != null && v > max) return `La valeur doit être inférieure ou égale à ${max}.`;
     }
-    if (q.max && Array.isArray(v) && v.length > q.max) return `${q.max} réponses maximum.`;
+    const lim = limitOf(q, ans);
+    if (lim && Array.isArray(v) && v.length > lim) return `${lim} réponse(s) maximum` + (q.maxFrom && QDEF[q.maxFrom] ? ` (selon votre réponse à la Q${QDEF[q.maxFrom].n}).` : ".");
+    if (q.explainRequired && !isEmpty(v) && isEmpty((ans[q.id + "_pourquoi"] || "").trim())) return "Veuillez compléter la zone « " + (q.explain || "Pourquoi ?") + " ».";
     return null;
   }
 

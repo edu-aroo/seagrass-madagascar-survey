@@ -4,7 +4,7 @@
    • META   : titre, textes d'accueil, contact, logos, photos, URL Apps Script
    • PHOTOS : photos du bandeau, de l'accueil et des sections (avec crédits)
    • LOOP   : boucle « par méthode » (les étapes perMethod: true sont répétées
-              pour chaque méthode cochée en Q16)
+              pour chaque méthode cochée en Q18)
    • STEPS  : étapes du formulaire et questions
    Les identifiants (id) deviennent les noms de colonnes dans Google
    Sheets et les noms de variables dans R : ne pas les modifier une fois
@@ -18,6 +18,9 @@
      groups: [...]  → options présentées par groupes (choix multiple)
      unit / units   → unité affichée / liste d'unités au choix (id_unite)
      max: 4         → nombre maximal de cases cochées
+     maxFrom: 'q076'→ nombre maximal = réponse numérique à une autre question (plafonné par max)
+     explainRequired: true → la zone « Pourquoi ? » devient obligatoire
+     rankNoun       → mot utilisé dans le message d'erreur d'un classement (rank)
      showIf         → { q:'q013', eq:'Non' } | { q:'q010', starts:'Oui' } |
                       { q:'q013', in:[...] } | { q:'q071', filled:true } |
                       { all:[cond1, cond2] }
@@ -25,7 +28,7 @@
 
 const SURVEY = {
   META: {
-    "version": "1.0",
+    "version": "1.1",
     "storeKey": "herbiers-enquete",
     "title": "Enquête nationale sur le suivi écologique des herbiers marins à Madagascar",
     "subtitle": "Inventaire des méthodes et protocoles de suivi des herbiers marins, de leurs performances et de leurs contraintes, en vue d'un protocole national harmonisé",
@@ -269,13 +272,24 @@ const SURVEY = {
           "help": "Plusieurs choix possibles."
         },
         {
-          "id": "q008",
+          "id": "q075",
           "n": 8,
-          "label": "Votre organisation bénéficie-t-elle d'un appui technique pour le suivi des herbiers ? Si oui, quels sont les partenaires techniques impliqués ?",
+          "label": "Votre organisation bénéficie-t-elle d'un appui technique pour la réalisation du suivi ?",
+          "type": "radio",
+          "required": true,
+          "options": [
+            "Oui",
+            "Non"
+          ],
+          "other": false
+        },
+        {
+          "id": "q008",
+          "n": 9,
+          "label": "Si oui, quels sont les partenaires techniques impliqués ?",
           "type": "checkbox",
           "required": true,
           "options": [
-            "Aucun appui technique",
             "IH.SM",
             "CNRO",
             "CNRE",
@@ -287,11 +301,15 @@ const SURVEY = {
             "Autre"
           ],
           "other": true,
-          "help": "Plusieurs partenaires possibles. Cochez « Aucun appui technique » si votre organisation travaille seule."
+          "help": "Plusieurs partenaires possibles.",
+          "showIf": {
+            "q": "q075",
+            "eq": "Oui"
+          }
         },
         {
           "id": "q009",
-          "n": 9,
+          "n": 10,
           "label": "Zone(s) géographique(s) d’intervention concernant les herbiers marins",
           "type": "textarea",
           "required": true,
@@ -299,7 +317,7 @@ const SURVEY = {
         },
         {
           "id": "q010",
-          "n": 10,
+          "n": 11,
           "label": "La ou les zone(s) d'intervention se trouvent-elles dans une Aire Marine Protégée (AMP) ?",
           "type": "radio",
           "required": true,
@@ -313,7 +331,7 @@ const SURVEY = {
         },
         {
           "id": "q011",
-          "n": 11,
+          "n": 12,
           "label": "Quelle est la catégorie de l'Aire Marine Protégée (AMP) concernée ?",
           "type": "checkbox",
           "required": true,
@@ -334,14 +352,14 @@ const SURVEY = {
         },
         {
           "id": "q012",
-          "n": 12,
+          "n": 13,
           "label": "Depuis quelle année votre organisation intervient-elle dans le suivi, la recherche ou la conservation des herbiers marins ?",
           "type": "year",
           "required": false
         },
         {
           "id": "q013",
-          "n": 13,
+          "n": 14,
           "label": "Votre organisation réalise-t-elle actuellement un suivi écologique des herbiers marins à Madagascar ?",
           "type": "radio",
           "required": true,
@@ -369,7 +387,7 @@ const SURVEY = {
       "questions": [
         {
           "id": "q014",
-          "n": 14,
+          "n": 15,
           "label": "Quelle est la superficie approximative de la zone de suivi ?",
           "type": "number",
           "required": true,
@@ -379,7 +397,7 @@ const SURVEY = {
         },
         {
           "id": "q015",
-          "n": 15,
+          "n": 16,
           "label": "Combien de campagnes de suivi sont réalisées par an ?",
           "type": "radio",
           "required": true,
@@ -393,9 +411,18 @@ const SURVEY = {
           "other": false
         },
         {
+          "id": "q076",
+          "n": 17,
+          "label": "Combien de méthodes ou protocoles de suivi des herbiers marins utilisez-vous ou avez-vous utilisés ?",
+          "type": "number",
+          "required": true,
+          "min": 1,
+          "help": "Si plus de 4, seules les 4 principales seront décrites en détail."
+        },
+        {
           "id": "q016",
-          "n": 16,
-          "label": "Quelles méthodes / protocoles de suivi des herbiers marins utilisez-vous ou avez-vous utilisés ?",
+          "n": 18,
+          "label": "Quels sont les noms exacts des méthodes / protocoles utilisés ?",
           "type": "checkbox",
           "required": true,
           "options": [
@@ -405,16 +432,16 @@ const SURVEY = {
             "Quadrat / points d’observation",
             "Cartographie SIG / télédétection",
             "Drone",
-            "Méthode institutionnelle ou projet spécifique",
             "Autre"
           ],
           "other": true,
-          "help": "Plusieurs choix possibles. Les sections suivantes seront répétées pour chaque méthode cochée (4 méthodes au maximum).",
-          "max": 4
+          "help": "Cochez autant de méthodes qu'indiqué à la question précédente (4 au maximum). Les sections suivantes seront répétées pour chaque méthode cochée.",
+          "max": 4,
+          "maxFrom": "q076"
         },
         {
           "id": "q017",
-          "n": 17,
+          "n": 19,
           "label": "Combien de personnes sont régulièrement impliquées dans la mise en œuvre du suivi écologique au sein de votre organisation ?",
           "type": "number",
           "required": true,
@@ -422,7 +449,7 @@ const SURVEY = {
         },
         {
           "id": "q018",
-          "n": 18,
+          "n": 20,
           "label": "Qui réalise principalement le suivi ?",
           "type": "checkbox",
           "required": true,
@@ -440,7 +467,7 @@ const SURVEY = {
         },
         {
           "id": "q019",
-          "n": 19,
+          "n": 21,
           "label": "Quel est le budget annuel approximatif alloué au suivi écologique des herbiers marins ?",
           "type": "radio",
           "required": true,
@@ -467,8 +494,8 @@ const SURVEY = {
       "questions": [
         {
           "id": "q020",
-          "n": 20,
-          "label": "Cette méthode est-elle encore utilisée par votre organisation ?",
+          "n": 22,
+          "label": "Cette méthode est-elle actuellement utilisée ou a-t-elle été utilisée auparavant ?",
           "type": "radio",
           "required": true,
           "options": [
@@ -480,7 +507,7 @@ const SURVEY = {
         },
         {
           "id": "q021",
-          "n": 21,
+          "n": 23,
           "label": "La méthode utilisée est-elle basée sur un protocole standardisé publié ou reconnu ?",
           "type": "radio",
           "required": true,
@@ -495,8 +522,8 @@ const SURVEY = {
         },
         {
           "id": "q022",
-          "n": 22,
-          "label": "Quelles parties du protocole ont été modifiées et pourquoi ?",
+          "n": 24,
+          "label": "Si la méthode a été adaptée, quelles parties du protocole ont été modifiées et pourquoi ?",
           "type": "textarea",
           "required": false,
           "showIf": {
@@ -519,7 +546,7 @@ const SURVEY = {
       "questions": [
         {
           "id": "q023",
-          "n": 23,
+          "n": 25,
           "label": "Quels sont les principaux objectifs du suivi réalisé avec cette méthode ?",
           "type": "checkbox",
           "required": true,
@@ -540,19 +567,20 @@ const SURVEY = {
         },
         {
           "id": "q024",
-          "n": 24,
+          "n": 26,
           "label": "Quels indicateurs écologiques sont mesurés avec cette méthode ?",
           "type": "checkbox",
           "required": true,
           "groups": [
             {
-              "label": "État de la végétation",
+              "label": "Végétation et biodiversité associée",
               "options": [
                 "Pourcentage de couverture",
-                "Composition spécifique",
+                "Composition spécifique des flores associées",
+                "Faune associée",
                 "Densité des pousses",
                 "Richesse spécifique",
-                "Diversité",
+                "Diversité spécifique des herbiers marins",
                 "Hauteur de la canopée",
                 "Biomasse",
                 "Mortalité / état des plants"
@@ -566,7 +594,7 @@ const SURVEY = {
               ]
             },
             {
-              "label": "Sédiment et paramètres du milieu",
+              "label": "Paramètres physico-chimiques",
               "options": [
                 "Caractéristiques du substrat",
                 "Matière organique",
@@ -578,10 +606,11 @@ const SURVEY = {
               ]
             },
             {
-              "label": "Pressions et faune",
+              "label": "Pressions",
               "options": [
                 "Pressions anthropiques",
-                "Faune associée"
+                "Sédimentation",
+                "Changement climatique"
               ]
             },
             {
@@ -593,10 +622,11 @@ const SURVEY = {
           ],
           "options": [
             "Pourcentage de couverture",
-            "Composition spécifique",
+            "Composition spécifique des flores associées",
+            "Faune associée",
             "Densité des pousses",
             "Richesse spécifique",
-            "Diversité",
+            "Diversité spécifique des herbiers marins",
             "Hauteur de la canopée",
             "Biomasse",
             "Mortalité / état des plants",
@@ -610,7 +640,8 @@ const SURVEY = {
             "Salinité",
             "Profondeur",
             "Pressions anthropiques",
-            "Faune associée",
+            "Sédimentation",
+            "Changement climatique",
             "Autre"
           ],
           "other": true,
@@ -618,20 +649,50 @@ const SURVEY = {
           "section": "E"
         },
         {
+          "id": "q077",
+          "n": 27,
+          "label": "Parmi les indicateurs sélectionnés, lesquels sont considérés comme les plus importants pour votre objectif de suivi ?",
+          "type": "rank",
+          "required": true,
+          "rankFrom": "q024",
+          "ranks": 3,
+          "rankNoun": "indicateur(s)",
+          "help": "Classez-les du plus important (1) au moins important (3).",
+          "rankEmpty": "Sélectionnez d'abord des indicateurs à la question précédente.",
+          "section": "E"
+        },
+        {
           "id": "q025",
-          "n": 25,
-          "label": "Parmi les indicateurs sélectionnés, lesquels sont les plus importants pour votre objectif de suivi ? Pourquoi ?",
+          "n": 28,
+          "label": "Expliquez pourquoi ces indicateurs sont les plus importants.",
           "type": "textarea",
-          "required": false,
+          "required": true,
+          "section": "E"
+        },
+        {
+          "id": "q078",
+          "n": 29,
+          "label": "Certains indicateurs sont-ils difficiles ou coûteux à mesurer ?",
+          "type": "radio",
+          "required": true,
+          "options": [
+            "Oui",
+            "Non"
+          ],
+          "other": false,
           "section": "E"
         },
         {
           "id": "q026",
-          "n": 26,
-          "label": "Certains indicateurs sont-ils difficiles ou coûteux à mesurer ? Si oui, lesquels et pourquoi ?",
+          "n": 30,
+          "label": "Si oui, lesquels et pourquoi ?",
           "type": "textarea",
-          "required": false,
-          "section": "E"
+          "required": true,
+          "section": "E",
+          "showIf": {
+            "q": "q078",
+            "eq": "Oui"
+          }
         }
       ]
     },
@@ -646,7 +707,7 @@ const SURVEY = {
       "questions": [
         {
           "id": "q027",
-          "n": 27,
+          "n": 31,
           "label": "Quel est le dispositif d’échantillonnage utilisé ?",
           "type": "checkbox",
           "required": true,
@@ -659,7 +720,7 @@ const SURVEY = {
             "Photographies / vidéo",
             "Télédétection satellite",
             "Drone",
-            "Prélèvements d'échantillons",
+            "Prélèvements d’échantillons",
             "Autre"
           ],
           "other": true,
@@ -667,7 +728,7 @@ const SURVEY = {
         },
         {
           "id": "q028",
-          "n": 28,
+          "n": 32,
           "label": "Les sites / stations de suivi sont-ils permanents ?",
           "type": "radio",
           "required": true,
@@ -677,32 +738,33 @@ const SURVEY = {
             "Certains seulement"
           ],
           "other": false,
-          "explain": "Pourquoi ? (facultatif)",
-          "section": "F"
+          "explain": "Pourquoi ?",
+          "section": "F",
+          "explainRequired": true
         },
         {
           "id": "q029",
-          "n": 29,
+          "n": 33,
           "label": "Comment les sites sont-ils sélectionnés ?",
           "type": "textarea",
-          "required": false,
+          "required": true,
           "section": "F"
         },
         {
           "id": "q030",
-          "n": 30,
-          "label": "Combien de stations / sites sont généralement suivis par campagne ?",
+          "n": 34,
+          "label": "Combien de stations par site sont généralement suivies par campagne ?",
           "type": "number",
-          "required": false,
+          "required": true,
           "min": 0,
           "section": "F"
         },
         {
           "id": "q031",
-          "n": 31,
+          "n": 35,
           "label": "Quelle est la durée moyenne d’une campagne de suivi sur le terrain pour cette méthode ?",
           "type": "radio",
-          "required": false,
+          "required": true,
           "options": [
             "1 à 2 jours",
             "3 à 4 jours",
@@ -715,10 +777,10 @@ const SURVEY = {
         },
         {
           "id": "q032",
-          "n": 32,
-          "label": "Quelle est la durée moyenne nécessaire pour réaliser un relevé sur une station / un site ?",
+          "n": 36,
+          "label": "Quelle est la durée moyenne nécessaire pour réaliser un relevé sur une station ?",
           "type": "number",
-          "required": false,
+          "required": true,
           "min": 0,
           "units": [
             "minutes",
@@ -740,7 +802,7 @@ const SURVEY = {
       "questions": [
         {
           "id": "q033",
-          "n": 33,
+          "n": 37,
           "label": "À quelle fréquence les données sont-elles collectées ?",
           "type": "radio",
           "required": true,
@@ -759,7 +821,7 @@ const SURVEY = {
         },
         {
           "id": "q034",
-          "n": 34,
+          "n": 38,
           "label": "La fréquence de suivi est-elle la même toute l’année ?",
           "type": "radio",
           "required": true,
@@ -773,19 +835,15 @@ const SURVEY = {
         },
         {
           "id": "q035",
-          "n": 35,
+          "n": 39,
           "label": "Quelles périodes / saisons sont privilégiées et pourquoi ?",
           "type": "textarea",
-          "required": false,
-          "showIf": {
-            "q": "q034",
-            "eq": "Non"
-          },
+          "required": true,
           "section": "G"
         },
         {
           "id": "q036",
-          "n": 36,
+          "n": 40,
           "label": "Quels équipements sont nécessaires ?",
           "type": "checkbox",
           "required": true,
@@ -810,7 +868,7 @@ const SURVEY = {
         },
         {
           "id": "q037",
-          "n": 37,
+          "n": 41,
           "label": "Quel est le niveau de compétence / formation nécessaire pour appliquer correctement cette méthode ?",
           "type": "radio",
           "required": true,
@@ -825,16 +883,16 @@ const SURVEY = {
         },
         {
           "id": "q038",
-          "n": 38,
+          "n": 42,
           "label": "Combien de personnes participent généralement au suivi avec cette méthode ?",
           "type": "number",
-          "required": false,
+          "required": true,
           "min": 0,
           "section": "H"
         },
         {
           "id": "q039",
-          "n": 39,
+          "n": 43,
           "label": "Une formation spécifique est-elle nécessaire ?",
           "type": "radio",
           "required": true,
@@ -847,10 +905,10 @@ const SURVEY = {
         },
         {
           "id": "q040",
-          "n": 40,
+          "n": 44,
           "label": "Si oui, quel type de formation est nécessaire ?",
           "type": "textarea",
-          "required": false,
+          "required": true,
           "showIf": {
             "q": "q039",
             "eq": "Oui"
@@ -871,7 +929,7 @@ const SURVEY = {
       "questions": [
         {
           "id": "q041",
-          "n": 41,
+          "n": 45,
           "label": "Les données issues de cette méthode sont-elles facilement comparables entre sites et entre années ?",
           "type": "radio",
           "required": true,
@@ -886,7 +944,7 @@ const SURVEY = {
         },
         {
           "id": "q042",
-          "n": 42,
+          "n": 46,
           "label": "Comment évaluez-vous la précision des données produites par cette méthode ?",
           "type": "scale",
           "required": true,
@@ -902,7 +960,7 @@ const SURVEY = {
         },
         {
           "id": "q043",
-          "n": 43,
+          "n": 47,
           "label": "Dans quelle mesure cette méthode permet-elle de détecter les changements à court terme ?",
           "type": "scale",
           "required": true,
@@ -918,7 +976,7 @@ const SURVEY = {
         },
         {
           "id": "q044",
-          "n": 44,
+          "n": 48,
           "label": "Dans quelle mesure cette méthode permet-elle de détecter les changements à long terme ?",
           "type": "scale",
           "required": true,
@@ -934,7 +992,7 @@ const SURVEY = {
         },
         {
           "id": "q045",
-          "n": 45,
+          "n": 49,
           "label": "Comment évaluez-vous la facilité de mise en œuvre de cette méthode ?",
           "type": "scale",
           "required": true,
@@ -950,7 +1008,7 @@ const SURVEY = {
         },
         {
           "id": "q046",
-          "n": 46,
+          "n": 50,
           "label": "Comment évaluez-vous le coût global de mise en œuvre ?",
           "type": "scale",
           "required": true,
@@ -966,7 +1024,7 @@ const SURVEY = {
         },
         {
           "id": "q047",
-          "n": 47,
+          "n": 51,
           "label": "Dans quelle mesure cette méthode est-elle adaptée aux réalités et capacités locales à Madagascar ?",
           "type": "scale",
           "required": true,
@@ -982,10 +1040,10 @@ const SURVEY = {
         },
         {
           "id": "q048",
-          "n": 48,
+          "n": 52,
           "label": "Dans quelle mesure les résultats sont-ils reproductibles entre différents observateurs / équipes ?",
           "type": "scale",
-          "required": false,
+          "required": true,
           "options": [
             "Très faible",
             "Faible",
@@ -1009,7 +1067,7 @@ const SURVEY = {
       "questions": [
         {
           "id": "q049",
-          "n": 49,
+          "n": 53,
           "label": "Quelles sont les principales contraintes rencontrées lors de l'application de cette méthode ?",
           "type": "checkbox",
           "required": true,
@@ -1032,7 +1090,7 @@ const SURVEY = {
         },
         {
           "id": "q050",
-          "n": 50,
+          "n": 54,
           "label": "Parmi ces contraintes, quelles sont les trois plus importantes ?",
           "type": "rank",
           "required": true,
@@ -1044,7 +1102,7 @@ const SURVEY = {
         },
         {
           "id": "q051",
-          "n": 51,
+          "n": 55,
           "label": "Quelles sont, selon vous, les principales limites scientifiques ou méthodologiques de cette méthode ?",
           "type": "textarea",
           "required": true,
@@ -1052,7 +1110,7 @@ const SURVEY = {
         },
         {
           "id": "q052",
-          "n": 52,
+          "n": 56,
           "label": "Quelles sont les principales forces / avantages de cette méthode ?",
           "type": "textarea",
           "required": true,
@@ -1071,7 +1129,7 @@ const SURVEY = {
       "questions": [
         {
           "id": "q053",
-          "n": 53,
+          "n": 57,
           "label": "Quelles sont les principales FORCES de cette méthode ?",
           "type": "checkbox",
           "required": true,
@@ -1097,7 +1155,7 @@ const SURVEY = {
         },
         {
           "id": "q054",
-          "n": 54,
+          "n": 58,
           "label": "Quelles sont les principales FAIBLESSES de cette méthode ?",
           "type": "checkbox",
           "required": true,
@@ -1125,7 +1183,7 @@ const SURVEY = {
         },
         {
           "id": "q055",
-          "n": 55,
+          "n": 59,
           "label": "Quelles sont les principales OPPORTUNITÉS pour améliorer ou développer cette méthode à Madagascar ?",
           "type": "checkbox",
           "required": true,
@@ -1153,7 +1211,7 @@ const SURVEY = {
         },
         {
           "id": "q056",
-          "n": 56,
+          "n": 60,
           "label": "Quelles sont les principales MENACES pouvant limiter son utilisation ou sa pérennisation ?",
           "type": "checkbox",
           "required": true,
@@ -1193,10 +1251,10 @@ const SURVEY = {
       "questions": [
         {
           "id": "q057",
-          "n": 57,
+          "n": 61,
           "label": "Selon vous, cette méthode pourrait-elle être intégrée dans un protocole national harmonisé de suivi des herbiers marins ?",
           "type": "radio",
-          "required": false,
+          "required": true,
           "options": [
             "Oui",
             "Oui, avec adaptations",
@@ -1208,10 +1266,10 @@ const SURVEY = {
         },
         {
           "id": "q058",
-          "n": 58,
+          "n": 62,
           "label": "Quels éléments de cette méthode devraient absolument être conservés dans un futur protocole national ?",
           "type": "textarea",
-          "required": false,
+          "required": true,
           "showIf": {
             "q": "q057",
             "starts": "Oui"
@@ -1220,7 +1278,7 @@ const SURVEY = {
         },
         {
           "id": "q059",
-          "n": 59,
+          "n": 63,
           "label": "Quelles adaptations seraient nécessaires pour permettre son utilisation à l’échelle nationale ?",
           "type": "textarea",
           "required": true,
@@ -1246,10 +1304,10 @@ const SURVEY = {
       "questions": [
         {
           "id": "q060",
-          "n": 60,
+          "n": 64,
           "label": "Quels logiciels ou applications utilisez-vous pour la collecte, la gestion ou l'analyse des données ?",
           "type": "checkbox",
-          "required": false,
+          "required": true,
           "options": [
             "Excel",
             "KoboToolbox",
@@ -1266,10 +1324,10 @@ const SURVEY = {
         },
         {
           "id": "q061",
-          "n": 61,
+          "n": 65,
           "label": "Comment les données sont-elles enregistrées sur le terrain ?",
           "type": "checkbox",
-          "required": false,
+          "required": true,
           "options": [
             "Fiches papier",
             "Excel",
@@ -1283,10 +1341,10 @@ const SURVEY = {
         },
         {
           "id": "q062",
-          "n": 62,
+          "n": 66,
           "label": "Où les données sont-elles stockées après la collecte ?",
           "type": "checkbox",
-          "required": false,
+          "required": true,
           "options": [
             "Excel",
             "Drive",
@@ -1301,17 +1359,18 @@ const SURVEY = {
         },
         {
           "id": "q063",
-          "n": 63,
+          "n": 67,
           "label": "Les données sont-elles partagées avec d’autres institutions / partenaires ?",
           "type": "radio",
-          "required": false,
+          "required": true,
           "options": [
             "Oui",
             "Partiellement",
             "Non"
           ],
           "other": false,
-          "explain": "Pourquoi ? Avec qui ? (facultatif)"
+          "explain": "Pourquoi ? Avec qui ?",
+          "explainRequired": true
         }
       ]
     },
@@ -1322,7 +1381,7 @@ const SURVEY = {
       "questions": [
         {
           "id": "q064",
-          "n": 64,
+          "n": 68,
           "label": "Pensez-vous qu'une harmonisation nationale des protocoles de suivi des herbiers marins est nécessaire ?",
           "type": "radio",
           "required": true,
@@ -1335,7 +1394,7 @@ const SURVEY = {
         },
         {
           "id": "q065",
-          "n": 65,
+          "n": 69,
           "label": "Quels critères sont les plus importants pour un futur protocole national ?",
           "type": "checkbox",
           "required": true,
@@ -1353,7 +1412,7 @@ const SURVEY = {
         },
         {
           "id": "q066",
-          "n": 66,
+          "n": 70,
           "label": "Quels indicateurs devraient, selon vous, être suivis de manière commune par tous les acteurs à Madagascar ?",
           "type": "checkbox",
           "required": true,
@@ -1374,10 +1433,10 @@ const SURVEY = {
         },
         {
           "id": "q067",
-          "n": 67,
+          "n": 71,
           "label": "Quels sont vos besoins prioritaires pour améliorer le suivi ?",
           "type": "checkbox",
-          "required": false,
+          "required": true,
           "options": [
             "Formation",
             "Matériel",
@@ -1392,10 +1451,10 @@ const SURVEY = {
         },
         {
           "id": "q068",
-          "n": 68,
+          "n": 72,
           "label": "Seriez-vous prêt(e) à adopter un protocole national harmonisé ?",
           "type": "radio",
-          "required": false,
+          "required": true,
           "options": [
             "Oui",
             "Non",
@@ -1406,10 +1465,10 @@ const SURVEY = {
         },
         {
           "id": "q069",
-          "n": 69,
+          "n": 73,
           "label": "Quelles méthodes recommandez-vous pour un futur protocole national ?",
           "type": "checkbox",
-          "required": false,
+          "required": true,
           "options": [
             "LIT",
             "Quadrats",
@@ -1424,10 +1483,10 @@ const SURVEY = {
         },
         {
           "id": "q070",
-          "n": 70,
+          "n": 74,
           "label": "Souhaitez-vous participer à l'élaboration d'un protocole national harmonisé ?",
           "type": "radio",
-          "required": false,
+          "required": true,
           "options": [
             "Oui",
             "Non",
@@ -1451,7 +1510,7 @@ const SURVEY = {
       "questions": [
         {
           "id": "q071",
-          "n": 71,
+          "n": 75,
           "label": "Téléchargez des photos illustrant la méthode / le protocole de suivi utilisé",
           "type": "file",
           "required": false,
@@ -1467,7 +1526,7 @@ const SURVEY = {
         },
         {
           "id": "q072",
-          "n": 72,
+          "n": 76,
           "label": "Nom et prénom(s) du photographe",
           "type": "text",
           "required": true,
@@ -1479,10 +1538,10 @@ const SURVEY = {
         },
         {
           "id": "q073",
-          "n": 73,
+          "n": 77,
           "label": "Localisation de la photo",
           "type": "text",
-          "required": false,
+          "required": true,
           "showIf": {
             "q": "q071",
             "filled": true
@@ -1491,10 +1550,10 @@ const SURVEY = {
         },
         {
           "id": "q074",
-          "n": 74,
+          "n": 78,
           "label": "Date et heure de la prise de vue",
           "type": "datetime",
-          "required": true,
+          "required": false,
           "showIf": {
             "q": "q071",
             "filled": true
